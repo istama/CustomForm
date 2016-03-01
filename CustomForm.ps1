@@ -75,7 +75,7 @@ function global:__new__formInstance ([hashtable] $hash) {
 
   # 値をチェックし条件に当てはまらない場合はエラーメッセージを投げる
   function assert ([scriptblock] $require, [string] $msg) {
-    if (! &$require) { throw $msg }
+    if (! (&$require)) { throw $msg }
   }
 
   # エラーメッセージを投げるヘルパーメソッド
@@ -154,9 +154,9 @@ function global:__new__formInstance ([hashtable] $hash) {
       [switch] $tail
     )
 
-    assert { $col -lt -1 } "col must be larger than -1. / $col"
+    assert { $col -ge 0 } "col must be more than 0. / $col"
     assert {
-      $align -ne "head" -and $align -ne "center" -and $align -ne "tail"
+      $align -eq "head" -or $align -eq "center" -or $align -eq "tail"
     } "align is invalid value. / $align"
 
     $ctrls = &$definition
