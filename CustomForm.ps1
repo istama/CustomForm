@@ -92,6 +92,147 @@ function global:__new__formInstance ([hashtable] $hash) {
     ($array | foreach $handle | Measure-Object -sum).Sum
   }
 
+  # コントロールを親コントロールに追加
+  function Create-ControlTree {
+    param(
+      [Parameter(Mandatory=$true)] $parent,
+      [Parameter(Mandatory=$true)][scriptblock] $definition
+    )
+    # 定義されたコントロールのオブジェクトを取得
+    $ctrls = @(
+      &$definition |
+      foreach { $id=0 } {
+        if (! $_ ) { write-error "invalid frame" }
+        else {
+          $_.id = $id++
+          $_
+        }
+      } |
+      sort { $_.col }, { $_.id } |
+      foreach { $row = 0; $col = 0 } {
+        # 各フレームに行要素を追加
+        if ($_.col -ne $col) {
+          $row = 0
+          $col = $_.col
+        }
+        $_.row = $row++
+        $_
+      })
+
+    foreach ($c in $ctrls) {
+      $parent.obj.Controls.Add($c.obj)
+    }
+
+    # 各行と列の長さを取得
+    $widthList = @()
+    $heightList = @()
+    foreach ($c in $ctrls) {
+      $w = $c.marginLeft + $c.obj.Size.Width + $c.marginRight
+      if ($c.col -ge $widthList.count) {
+        $widthList += $w
+      }
+      elseif ($w -gt $widthList[$c.col]) {
+        $widthList[$c.col] = $w
+      }
+
+      $h = $c.marginTop + $c.obj.Size.Height + $c.marginBottom
+      if ($c.row -ge $heightList.count) {
+        $heightList += $h
+      }
+      elseif ($h -gt $heightList[$c.row]) {
+        $heightList[$c.row] = $h
+      }
+    }
+
+    # 各行と列の開始座標を取得
+    $xLocationList = @(
+      $parent.padLeft
+      if ($widthList.count -gt 0) {
+        foreach ($i in 0..($widthList.count-1)) {
+          $parent.padLeft + (sum $widthList[0..$i] { $_ })
+        }
+      })
+    $yLocationList = @(
+      $parent.padTop
+      if ($heightList.count -gt 0) {
+        foreach ($i in 0..($heightList.count-1)) {
+          $parent.padTop + (sum $heightList[0..$i] { $_ })
+        }
+      })
+
+    # 親コントロールにコントロールを追加する
+    switch ($ctrls | foreach { $_.align }) {
+      TopLeft {
+        $x = $xLocationList[$_.col] + $_.marginLeft
+        $y = $yLocationList[$_.row] + $_.marginTop
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      TopCenter {
+        $x = $xLocationList[$_.col] + ($xLocationList[$_.col+1] - $_.obj.Size.Width - $xLocationList[$_.col]) / 2
+        $y = $yLocationList[$_.row] + $_.marginTop
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      TopRight {
+        $x = $xLocationList[$_.col+1] - $_.obj.Size.Width - $_.marginRight
+        $y = $yLocationList[$_.row] + $_.marginTop
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      MiddleLeft {
+        $x = $xLocationList[$_.col] + $_.marginLeft
+        $y = $yLocationList[$_.row] + ($xLocationList[$_.row+1] - $_.obj.Size.Height - $xLocationList[$_.row]) / 2
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      MiddleCenter {
+        $x = $xLocationList[$_.col] + ($xLocationList[$_.col+1] - $_.obj.Size.Width - $xLocationList[$_.col]) / 2
+        $y = $yLocationList[$_.row] + ($xLocationList[$_.row+1] - $_.obj.Size.Height - $xLocationList[$_.row]) / 2
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      MiddleRight {
+        $x = $xLocationList[$_.col+1] - $_.obj.Size.Width - $_.marginRight
+        $y = $yLocationList[$_.row] + ($xLocationList[$_.row+1] - $_.obj.Size.Height - $xLocationList[$_.row]) / 2
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      BottomLeft {
+        $x = $xLocationList[$_.col] + $_.marginLeft
+        $y = $yLocationList[$_.row+1] - $_.obj.Size.Height - $_.marginBottom
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      BottomCenter {
+        $x = $xLocationList[$_.col] + ($xLocationList[$_.col+1] - $_.obj.Size.Width - $xLocationList[$_.col]) / 2
+        $y = $yLocationList[$_.row+1] - $_.obj.Size.Height - $_.marginBottom
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+      BottomRight {
+        $x = $xLocationList[$_.col+1] - $_.obj.Size.Width - $_.marginRight
+        $y = $yLocationList[$_.row+1] - $_.obj.Size.Height - $_.marginBottom
+        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
+        $parent.obj.Controls.Add($_.obj)
+        continue
+      }
+    }
+
+    $parent.obj.ClientSize = New-Object System.Drawing.Size(
+      ($xLocationList[-1] + $parent.padRight),
+      ($yLocationList[-1] + $parent.padBottom)
+    )
+  }
+
   # ラベルのサイズと表示位置をセットする
   function align-labelText {
     param(
@@ -121,6 +262,50 @@ function global:__new__formInstance ([hashtable] $hash) {
   # コントロールの定義
   #
 
+  # コントロールの配置を定義するオブジェクトを作成
+  # コントロールのラッパーとなる
+  function control {
+    param(
+      [int] $col=0,
+      [int] $marginTop=0,
+      [int] $marginBottom=0,
+      [int] $marginLeft=0,
+      [int] $marginRight=0,
+      [string] $align="TopLeft",
+      [Parameter(Mandatory=$true)] $control=$null
+    )
+    @{
+      obj          = $control
+      col          = $col
+      marginLeft   = $marginLeft
+      marginRight  = $marginRight
+      marginTop    = $marginTop
+      marginBottom = $marginBottom
+      align        = $align
+    }
+  }
+
+  # フレームを作成
+  function frame {
+    param(
+      [int] $padTop=10,
+      [int] $padBottom=10,
+      [int] $padLeft=10,
+      [int] $padRight=10,
+      [Parameter(Mandatory=$true)]
+      [scriptblock] $definition
+    )
+    $frame = @{
+      obj       = New-Object System.Windows.Forms.Panel
+      padTop    = $padTop
+      padBottom = $padBottom
+      padLeft   = $padLeft
+      padRight  = $padRight
+    }
+
+    Create-ControlTree $frame $definition
+  }
+
   # ボタンを作成
   function button ([string] $text="", [int] $width=-1, [int] $height=-1, [scriptblock] $event) {
     $b      = New-Object System.Windows.Forms.Button
@@ -138,94 +323,7 @@ function global:__new__formInstance ([hashtable] $hash) {
     $l
   }
 
-  # フレーム
-  function frame {
-    param(
-      [Parameter(Mandatory=$true, Position=1)]
-      [scriptblock] $definition,
-      [int] $col=0,
-      [int] $padTop=10,
-      [int] $padBottom=10,
-      [int] $padLeft=10,
-      [int] $padRight=10,
-      [int] $elementsMargin=5,
-      [string] $align="head",
-      [switch] $horizontal,
-      [switch] $tail
-    )
 
-    assert { $col -ge 0 } "col must be more than 0. / $col"
-    assert {
-      $align -eq "head" -or $align -eq "center" -or $align -eq "tail"
-    } "align is invalid value. / $align"
-
-    $ctrls = &$definition
-    $panel = New-Object System.Windows.Forms.Panel
-
-    $x = $padLeft
-    $y = $padTop
-    $width = 0
-    $height = 0
-
-    # 座標をセットせずに先にパネルに追加だけする理由は、
-    # Labelはパネルに追加しないと、サイズが確定されないため、
-    foreach ($c in $ctrls) {
-      $panel.controls.Add($c)
-    }
-
-    # コントロールの座標をセットする
-    if ($horizontal) {
-      $maxHeight = max $ctrls { $_.Size.Height }
-      # コントロールを横に並べる
-      foreach ($c in $ctrls) {
-        if ($c -is [System.Windows.Forms.Label]) {
-          $lAlign = $(
-            if ($align -eq "center") { $CONTENT_ALIGNMENT::MiddleLeft }
-            elseif ($align -eq "tail") { $CONTENT_ALIGNMENT::BottomLeft }
-            else { $CONTENT_ALIGNMENT::TopLeft }
-          )
-          align-labelText $c $c.Size.Width $maxHeight $lAlign
-        }
-        $c.Location = New-Object System.Drawing.Point($x, $y)
-
-        $x += $c.Size.Width + $elementsMargin
-        if ($c.Size.Height -gt $height) {
-          $height = $c.Size.Height
-        }
-      }
-     $width = $x - $elementsMargin + $padRight
-     $height += $padBottom
-    }
-    else {
-      $maxWidth = max $ctrls { $_.Size.Width }
-      # コントロールを縦に並べる
-      foreach ($c in $ctrls) {
-        if ($c -is [System.Windows.Forms.Label]) {
-          $lAlign = $(
-            if ($align -eq "center") { $CONTENT_ALIGNMENT::TopCenter }
-            elseif ($align -eq "tail") { $CONTENT_ALIGNMENT::TopRight }
-            else { $CONTENT_ALIGNMENT::TopLeft }
-          )
-          align-labelText $c $maxWidth $c.Size.Height $lAlign
-        }
-        $c.Location = New-Object System.Drawing.Point($x, $y)
-
-        $y += $c.Size.Height + $elementsMargin
-        if ($c.Size.Width -gt $width) {
-          $width = $c.Size.Width
-        }
-      }
-      $height = $y - $elementsMargin + $padBottom
-      $width += $padRight
-    }
-
-    $panel.Size = New-Object System.Drawing.Size($width, $height)
-    @{
-      panel = $panel
-      col   = $col
-      tail  = $tail
-    }
-  }
 
   #
   # 関数本文の開始
