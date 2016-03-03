@@ -29,7 +29,7 @@ function global:CustomForm {
     throw "type $type is already defined"
   }
 
-  $hash = @{
+  $param = @{
     text=$text
     definition=$definition
     padTop=$padTop
@@ -41,19 +41,19 @@ function global:CustomForm {
   # クラス定義を実行して破棄する
   # こうすることでクラス定義に構文エラーがあった場合、
   # インスタンス生成時ではなくクラス定義の時点でエラー検出できる
-  __new__formInstance $hash > $null
+  #__new__formInstance $param > $null
 
-  $global:__FormClassTable__[$type] = $hash
+  $global:__FormClassTable__[$type] = $param
 }
 
 # インスタンス生成メソッドのキーワードを作成
 function global:Create-Form ([string] $type) {
-  $hash = $__FormClassTable__[$type]
-  if (! $hash) {
+  $param = $__FormClassTable__[$type]
+  if (! $param) {
     thorw "$type is undefined"
   }
 
-  __new__formInstance $hash
+  __new__formInstance $param
 }
 
 # クラス定義を削除するためのヘルパー関数
@@ -63,7 +63,7 @@ function Remove-Class ([string] $type) {
 
 # クラス定義が記述されたスクリプトブロックを実行し、
 # 合成メンバオブジェクトのコレクションを返すヘルパー関数を用意する
-function global:__new__formInstance ([hashtable] $hash) {
+function global:__new__formInstance ([hashtable] $param) {
   #
   # .NETライブラリの簡易名
   #
@@ -160,77 +160,37 @@ function global:__new__formInstance ([hashtable] $hash) {
         }
       })
 
+    $sbHeadLoc   = { param($idx) $this[$idx] }
+    $sbCenterLoc = { param($idx, $size) $this[$idx] + ($this[$idx+1] - $size - $this[$idx]) / 2 }
+    $sbTailLoc   = { param($idx, $size) $this[$idx+1] - $size}
+
+    $xLocationList = Add-Member -in $xLocationList -member scriptMethod -name GetHeadLocation -value $sbHeadLoc -passthru
+    Add-Member -in $xLocationList -member scriptMethod -n GetCenterLocation -value $sbCenterLoc
+    Add-Member -in $xLocationList -member scriptMethod -n GetTailLocation -value $sbTailLoc
+    $yLocationList = Add-Member -passthru -in $yLocationList scriptMethod GetHeadLocation $sbHeadLoc
+    Add-Member -in $yLocationList scriptMethod GetCenterLocation $sbCenterLoc
+    Add-Member -in $yLocationList scriptMethod GetTailLocation $sbTailLoc
+
     # 親コントロールにコントロールを追加する
-    switch ($ctrls | foreach { $_.align }) {
-      TopLeft {
-        $x = $xLocationList[$_.col] + $_.marginLeft
-        $y = $yLocationList[$_.row] + $_.marginTop
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      TopCenter {
-        $x = $xLocationList[$_.col] + ($xLocationList[$_.col+1] - $_.obj.Size.Width - $xLocationList[$_.col]) / 2
-        $y = $yLocationList[$_.row] + $_.marginTop
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      TopRight {
-        $x = $xLocationList[$_.col+1] - $_.obj.Size.Width - $_.marginRight
-        $y = $yLocationList[$_.row] + $_.marginTop
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      MiddleLeft {
-        $x = $xLocationList[$_.col] + $_.marginLeft
-        $y = $yLocationList[$_.row] + ($xLocationList[$_.row+1] - $_.obj.Size.Height - $xLocationList[$_.row]) / 2
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      MiddleCenter {
-        $x = $xLocationList[$_.col] + ($xLocationList[$_.col+1] - $_.obj.Size.Width - $xLocationList[$_.col]) / 2
-        $y = $yLocationList[$_.row] + ($xLocationList[$_.row+1] - $_.obj.Size.Height - $xLocationList[$_.row]) / 2
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      MiddleRight {
-        $x = $xLocationList[$_.col+1] - $_.obj.Size.Width - $_.marginRight
-        $y = $yLocationList[$_.row] + ($xLocationList[$_.row+1] - $_.obj.Size.Height - $xLocationList[$_.row]) / 2
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      BottomLeft {
-        $x = $xLocationList[$_.col] + $_.marginLeft
-        $y = $yLocationList[$_.row+1] - $_.obj.Size.Height - $_.marginBottom
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      BottomCenter {
-        $x = $xLocationList[$_.col] + ($xLocationList[$_.col+1] - $_.obj.Size.Width - $xLocationList[$_.col]) / 2
-        $y = $yLocationList[$_.row+1] - $_.obj.Size.Height - $_.marginBottom
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
-      BottomRight {
-        $x = $xLocationList[$_.col+1] - $_.obj.Size.Width - $_.marginRight
-        $y = $yLocationList[$_.row+1] - $_.obj.Size.Height - $_.marginBottom
-        $_.obj.Location = New-Object System.Drawing.Point($x, $y)
-        $parent.obj.Controls.Add($_.obj)
-        continue
-      }
+    switch -wildcard -regex ($ctrls) {
+      {$_.align -match '^Top'}    { $y = $yLocationList.GetHeadLocation($_.row) + $_.marginTop }
+      {$_.align -match "^Middle"} { $y = $yLocationList.GetCenterLocation($_.row, $_.obj.Size.Height) }
+      {$_.align -match "^Bottom"} { $y = $yLocationList.GetTailLocation($_.row, $_.obj.Size.Height) - $_.marginBottom }
+      {$_.align -match "Left$"}   { $x = $xLocationList.GetHeadLocation($_.col) + $_.marginLeft }
+      {$_.align -match "Center$"} { $x = $xLocationList.GetCenterLocation($_.col, $_.obj.Size.Width) }
+      {$_.align -match "Right$"}  { $x = $xLocationList.GetTailLocation($_.col, $_.obj.Size.Width) - $_.marginRight }
+      { $true } { $_.obj.Location = New-Object System.Drawing.Point($x, $y) }
     }
 
     $parent.obj.ClientSize = New-Object System.Drawing.Size(
       ($xLocationList[-1] + $parent.padRight),
       ($yLocationList[-1] + $parent.padBottom)
     )
+
+    write-host "frameSize: w: " $parent.PadLeft " " $xLocationList[-1] " " $parent.PadRight
+    write-host "frameSize: h: " $parent.PadTop " " $yLocationList[-1] " " $parent.PadBottom
+
+    $parent.obj
   }
 
   # ラベルのサイズと表示位置をセットする
@@ -264,16 +224,18 @@ function global:__new__formInstance ([hashtable] $hash) {
 
   # コントロールの配置を定義するオブジェクトを作成
   # コントロールのラッパーとなる
-  function control {
+  function frame {
     param(
+      [Parameter(Mandatory=$true, Position=1)] $control=$null,
       [int] $col=0,
       [int] $marginTop=0,
       [int] $marginBottom=0,
       [int] $marginLeft=0,
       [int] $marginRight=0,
-      [string] $align="TopLeft",
-      [Parameter(Mandatory=$true)] $control=$null
+      [string] $align="TopLeft"
     )
+    assert { $col -ge 0 } "-col must be more than 0."
+
     @{
       obj          = $control
       col          = $col
@@ -285,17 +247,17 @@ function global:__new__formInstance ([hashtable] $hash) {
     }
   }
 
-  # フレームを作成
-  function frame {
+  # パネルを作成
+  function panel {
     param(
+      [Parameter(Mandatory=$true, Position=1)]
+      [scriptblock] $definition,
       [int] $padTop=10,
       [int] $padBottom=10,
       [int] $padLeft=10,
-      [int] $padRight=10,
-      [Parameter(Mandatory=$true)]
-      [scriptblock] $definition
+      [int] $padRight=10
     )
-    $frame = @{
+    $panel = @{
       obj       = New-Object System.Windows.Forms.Panel
       padTop    = $padTop
       padBottom = $padBottom
@@ -303,7 +265,7 @@ function global:__new__formInstance ([hashtable] $hash) {
       padRight  = $padRight
     }
 
-    Create-ControlTree $frame $definition
+    Create-ControlTree $panel $definition
   }
 
   # ボタンを作成
@@ -323,95 +285,21 @@ function global:__new__formInstance ([hashtable] $hash) {
     $l
   }
 
-
-
   #
   # 関数本文の開始
   #
 
-  # 各フレームのオブジェクトを取得
-  $frames = @(
-    &$hash.definition |
-    foreach { $id=0 } {
-      if (! $_ ) { write-error "invalid frame" }
-      else {
-        $_.id = $id++
-        $_
-      }
-    } |
-    sort { $_.col }, { $_.id } |
-    foreach { $row = 0; $col = 0 } {
-      # 各フレームに行要素を追加
-      if ($_.col -ne $col) {
-        $row = 0
-        $col = $_.col
-      }
-      $_.row = $row++
-      $_
-    })
-
-  # 各行と列の長さを取得
-  $widthList = @()
-  $heightList = @()
-  foreach ($f in $frames) {
-    if ($f.col -ge $widthList.count) {
-      $widthList += $f.panel.Width
-    }
-    elseif ($f.panel.Width -gt $widthList[$f.col]) {
-      $widthList[$f.col] = $f.panel.Width
-    }
-
-    if ($f.row -ge $heightList.count) {
-      $heightList += $f.panel.Height
-    }
-    elseif ($f.panel.Height -gt $heightList[$f.row]) {
-      $heightList[$f.row] = $f.panel.Height
-    }
+  $parent = @{
+    obj       = New-Object System.Windows.Forms.Form
+    padTop    = $param.padTop
+    padBottom = $param.padBottom
+    padLeft   = $param.padLeft
+    padRight  = $param.padRight
   }
 
-  # 各行と列の開始座標を取得
-  $xLocationList = @(
-    $hash.padLeft
-    if ($widthList.count -gt 0) {
-      foreach ($i in 0..($widthList.count-1)) {
-        $hash.padLeft + (sum $widthList[0..$i] { $_ })
-      }
-    })
-  $yLocationList = @(
-    $hash.padTop
-    if ($heightList.count -gt 0) {
-      foreach ($i in 0..($heightList.count-1)) {
-        $hash.padTop + (sum $heightList[0..$i] { $_ })
-      }
-    })
+  $form = Create-ControlTree $parent $param.definition
 
-  # フォームにフレームを追加する
-  $form = New-Object System.Windows.Forms.Form
-  foreach ($f in $frames) {
-    if ($f.tail) {
-      if ($f.horizontal) {
-        $x = $xLocationList[$f.col+1] - $f.panel.Size.Width
-        $y = $yLocationList[$f.row]
-      }
-      else {
-        $x = $xLocationList[$f.col]
-        $y = $yLocationList[$f.row+1] - $f.panel.Size.Height
-      }
-    }
-    else {
-      $x = $xLocationList[$f.col]
-      $y = $yLocationList[$f.row]
-    }
-
-    $f.panel.Location = New-Object System.Drawing.Point($x, $y)
-    $form.Controls.Add($f.panel)
-  }
-
-  $form.Text = $hash.text
-  $form.ClientSize = New-Object System.Drawing.Size(
-    ($xLocationList[-1] + $hash.padRight),
-    ($yLocationList[-1] + $hash.padBottom)
-  )
+  $form.Text = $param.text
   $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
   $form.StartPosition = "CenterScreen"
 
